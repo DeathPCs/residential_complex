@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import {
   Container,
   Typography,
@@ -14,7 +14,7 @@ import {
   Paper,
   InputAdornment,
   IconButton,
-  Menu,
+  Alert,
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import {
@@ -22,13 +22,14 @@ import {
   Search,
   Edit,
   CheckCircle,
-  Report,
   Delete,
-  PlayArrow,
 } from '@mui/icons-material';
-import api from '../../services/api';
+import api, { updateDamageReportStatus } from '../../services/api';
+import { AuthContext } from '../../context/AuthContext';
+import Loading from '../../components/common/Loading';
 
 const DamageReports = () => {
+  const { user } = useContext(AuthContext);
   const [reports, setReports] = useState([]);
   const [apartments, setApartments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,13 +37,14 @@ const DamageReports = () => {
   const [editing, setEditing] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [menuAnchorEl, setMenuAnchorEl] = useState(null);
-  const [selectedReportId, setSelectedReportId] = useState(null);
+
+  const [error, setError] = useState(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    priority: 'low',
+    priority: '',
     apartmentId: '',
+    reportedBy: '',
   });
 
   useEffect(() => {
@@ -62,10 +64,13 @@ const DamageReports = () => {
   const fetchReports = async () => {
     try {
       setLoading(true);
+      setError(null);
       const response = await api.get('/damage-reports/my-reports');
       setReports(response.data.data || []);
     } catch (error) {
       console.error('Error fetching damage reports:', error);
+      setError(error.userMessage || 'Error al cargar reportes de daños');
+      setReports([]);
     } finally {
       setLoading(false);
     }
@@ -80,10 +85,11 @@ const DamageReports = () => {
       }
       setOpen(false);
       setEditing(null);
-      setFormData({ title: '', description: '', priority: 'low', apartmentId: '' });
+      setFormData({ title: '', description: '', priority: '', apartmentId: '', reportedBy: '' });
       fetchReports();
     } catch (error) {
       console.error('Error creating/updating damage report:', error);
+      setError(error.userMessage || 'Error al crear/actualizar reporte de daño');
     }
   };
 
@@ -94,6 +100,7 @@ const DamageReports = () => {
       description: report.description,
       priority: report.priority,
       apartmentId: report.apartmentId,
+      reportedBy: report.reportedBy,
     });
     setOpen(true);
   };
@@ -105,16 +112,30 @@ const DamageReports = () => {
         fetchReports();
       } catch (error) {
         console.error('Error deleting damage report:', error);
+        setError(error.userMessage || 'Error al eliminar reporte de daño');
       }
     }
   };
 
-  const handleStatusChange = async (id, newStatus) => {
-    try {
-      await api.put(`/damage-reports/${id}`, { status: newStatus });
-      fetchReports();
-    } catch (error) {
-      console.error('Error updating damage report status:', error);
+  const handleStatusToggle = async (id, currentStatus) => {
+    if (currentStatus === 'resolved') return; // No permitir cambiar de resuelto
+
+    const statusCycle = ['reported', 'acknowledged', 'in_progress', 'resolved'];
+    const currentIndex = statusCycle.indexOf(currentStatus);
+    const nextStatus = statusCycle[currentIndex + 1];
+
+    if (nextStatus) {
+      // Optimistically update the local state
+      setReports(prev => prev.map(r => r.id === id ? { ...r, status: nextStatus } : r));
+
+      try {
+        await updateDamageReportStatus(id, nextStatus);
+      } catch (error) {
+        // Revert the change on error
+        setReports(prev => prev.map(r => r.id === id ? { ...r, status: currentStatus } : r));
+        console.error('Error updating damage report status:', error);
+        setError(error.userMessage || 'Error al actualizar estado del reporte de daño');
+      }
     }
   };
 
@@ -126,6 +147,46 @@ const DamageReports = () => {
     return matchesSearch && matchesStatus;
   });
 
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'reported': return 'warning';
+      case 'acknowledged': return 'normal';
+      case 'in_progress': return 'info';
+      case 'resolved': return 'success'
+      default: return 'default';
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'reported': return 'Reportado';
+      case 'acknowledged': return 'Admitido';
+      case 'in_progress': return 'En Progreso';
+      case 'resolved': return 'Resuelto'
+      default: return status;
+    }
+  };
+
+  const getPriorityColor = (status) => {
+    switch (status) {
+      case 'low': return 'normal';
+      case 'medium': return 'warning';
+      case 'high': return 'warning';
+      case 'urgent': return 'error';
+      default: return 'default';
+    }
+  };
+
+  const getPriorityLabel = (status) => {
+    switch (status) {
+      case 'low': return 'Baja';
+      case 'medium': return 'Media';
+      case 'high': return 'Alta';
+      case 'urgent': return 'Urgente';
+      default: return status;
+    }
+  };
+
   const columns = [
     {
       field: 'apartment',
@@ -133,8 +194,16 @@ const DamageReports = () => {
       width: 190,
       renderCell: (params) => {
         const apartment = apartments.find(a => a.id === params.row.apartmentId);
-        return apartment ? `Torre ${apartment.tower} - Apt. ${apartment.number} - Piso ${apartment.floor} ` : 'N/A';
+        return apartment ? `Torre ${apartment.tower} - Apt. ${apartment.number} ` : 'N/A';
       },
+    },
+    {
+      field: 'reportedBy',
+      headerName: 'Reportero',
+      width: 100,
+      renderCell: (params) => {
+        return params.row.reporter ? `${params.row.reporter.name}` : 'N/A';
+      }
     },
     {
       field: 'title',
@@ -152,15 +221,12 @@ const DamageReports = () => {
       headerName: 'Prioridad',
       width: 100,
       renderCell: (params) => (
-        <Chip
-          label={params.value}
-          color={
-            params.value === 'high' ? 'error' :
-            params.value === 'medium' ? 'warning' : 'default'
-          }
-          size="small"
-        />
-      ),
+      <Chip
+        label={getPriorityLabel(params.value)}
+        color={getPriorityColor(params.value)}
+        size="small"
+      />
+    ),
     },
     {
       field: 'status',
@@ -168,11 +234,8 @@ const DamageReports = () => {
       width: 120,
       renderCell: (params) => (
         <Chip
-          label={params.value}
-          color={
-            params.value === 'resolved' ? 'success' :
-            params.value === 'in_progress' ? 'primary' : 'default'
-          }
+          label={getStatusLabel(params.value)}
+          color={getStatusColor(params.value)}
           size="small"
         />
       ),
@@ -189,9 +252,23 @@ const DamageReports = () => {
     {
       field: 'actions',
       headerName: 'Acciones',
-      width: 120,
+      width: 200,
       renderCell: (params) => (
-        <Box>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {params.row.status !== 'resolved' && (
+            <IconButton
+              size="small"
+              onClick={() => handleStatusToggle(params.row.id, params.row.status)}
+              color="success"
+              title={
+                params.row.status === 'reported' ? 'Admitir' :
+                params.row.status === 'acknowledged' ? 'Iniciar' :
+                params.row.status === 'in_progress' ? 'Resolver' : 'Cambiar Estado'
+              }
+            >
+              <CheckCircle />
+            </IconButton>
+          )}
           <IconButton
             size="small"
             onClick={() => handleEdit(params.row)}
@@ -222,6 +299,12 @@ const DamageReports = () => {
         </Typography>
       </Box>
 
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
       <Paper sx={{ p: 2, mb: 2 }}>
         <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
           <TextField
@@ -245,7 +328,8 @@ const DamageReports = () => {
             sx={{ minWidth: 160 }}
           >
             <MenuItem value="">Todos</MenuItem>
-            <MenuItem value="pending">Pendiente</MenuItem>
+            <MenuItem value="reported">Reportado</MenuItem>
+            <MenuItem value="acknowledged">Admitido</MenuItem>
             <MenuItem value="in_progress">En Progreso</MenuItem>
             <MenuItem value="resolved">Resuelto</MenuItem>
           </TextField>
@@ -313,6 +397,7 @@ const DamageReports = () => {
               <MenuItem value="low">Baja</MenuItem>
               <MenuItem value="medium">Media</MenuItem>
               <MenuItem value="high">Alta</MenuItem>
+              <MenuItem value="urgent">Urgente</MenuItem>
             </TextField>
           </Box>
         </DialogContent>
@@ -323,6 +408,8 @@ const DamageReports = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+
     </Container>
   );
 };

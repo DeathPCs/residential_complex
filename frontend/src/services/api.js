@@ -24,6 +24,24 @@ api.interceptors.request.use(
   }
 );
 
+// Retry function for rate limit errors
+const retryRequest = async (fn, retries = 3, delay = 1000) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error.response?.status === 429 && i < retries - 1) {
+        // Exponential backoff
+        const backoffDelay = delay * Math.pow(2, i);
+        console.warn(`Rate limit hit, retrying in ${backoffDelay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+        continue;
+      }
+      throw error;
+    }
+  }
+};
+
 // Response interceptor to handle errors
 api.interceptors.response.use(
   (response) => response,
@@ -54,6 +72,9 @@ api.interceptors.response.use(
           break;
         case 422:
           errorMessage = data?.error || 'Datos de entrada inválidos';
+          break;
+        case 429:
+          errorMessage = 'Demasiadas solicitudes. Reintentando automáticamente...';
           break;
         case 500:
           errorMessage = 'Error interno del servidor. Inténtalo más tarde';
@@ -95,7 +116,7 @@ export const login = async (email, password) => {
 // GET ALL APARTMENTS
 export const getApartments = async () => {
   try {
-    const res = await api.get('/apartments');
+    const res = await retryRequest(() => api.get('/apartments'));
     return res.data.data;
   } catch (err) {
     console.error("Error al obtener apartamentos:", err.response?.data || err.message);
@@ -106,7 +127,7 @@ export const getApartments = async () => {
 // CREATE APARTMENT
 export const createApartment = async (apartmentData) => {
   try {
-    const res = await api.post('/apartments', apartmentData);
+    const res = await retryRequest(() => api.post('/apartments', apartmentData));
     return res.data.data;
   } catch (err) {
     console.error("Error al crear apartamento:", err.response?.data || err.message);
@@ -117,7 +138,7 @@ export const createApartment = async (apartmentData) => {
 // EDITAR APARTAMENTO
 export const updateApartment = async (id, apartmentData) => {
   try {
-    const res = await api.put(`/apartments/${id}`, apartmentData);
+    const res = await retryRequest(() => api.put(`/apartments/${id}`, apartmentData));
     return res.data.data;
   } catch (err) {
     console.error("Error al actualizar apartamento:", err.response?.data || err.message);
@@ -128,7 +149,7 @@ export const updateApartment = async (id, apartmentData) => {
 // ELIMINAR APARTAMENTO
 export const deleteApartment = async (id) => {
   try {
-    const res = await api.delete(`/apartments/${id}`);
+    const res = await retryRequest(() => api.delete(`/apartments/${id}`));
     return res.data;
   } catch (err) {
     console.error("Error al eliminar apartamento:", err.response?.data || err.message);
@@ -138,7 +159,7 @@ export const deleteApartment = async (id) => {
 
 export const createPayment = async (paymentData) => {
   try {
-    const res = await api.post('/payments', paymentData);
+    const res = await retryRequest(() => api.post('/payments', paymentData));
     return res.data.data;
   } catch (err) {
     throw err.response?.data || { error: "Error de conexión" };
@@ -147,7 +168,7 @@ export const createPayment = async (paymentData) => {
 
 export const getPayments = async (month) => {
   try {
-    const res = await api.get(`/payments${month ? `?month=${month}` : ""}`);
+    const res = await retryRequest(() => api.get(`/payments${month ? `?month=${month}` : ""}`));
     return res.data.data;
   } catch (err) {
     throw err.response?.data || { error: "Error de conexión" };
@@ -156,7 +177,7 @@ export const getPayments = async (month) => {
 
 export const registerPaymentAsPaid = async (paymentId) => {
   try {
-    const res = await api.put(`/payments/${paymentId}/pay`, {});
+    const res = await retryRequest(() => api.put(`/payments/${paymentId}/pay`, {}));
     return res.data.data;
   } catch (err) {
     throw err.response?.data || { error: "Error de conexión" };
@@ -165,7 +186,7 @@ export const registerPaymentAsPaid = async (paymentId) => {
 
 export const updatePayment = async (id, paymentData) => {
   try {
-    const res = await api.put(`/payments/${id}`, paymentData);
+    const res = await retryRequest(() => api.put(`/payments/${id}`, paymentData));
     return res.data.data;
   } catch (err) {
     console.error("Error al actualizar pago:", err.response?.data || err.message);
@@ -175,7 +196,7 @@ export const updatePayment = async (id, paymentData) => {
 
 export const deletePayment = async (id) => {
   try {
-    const res = await api.delete(`/payments/${id}`);
+    const res = await retryRequest(() => api.delete(`/payments/${id}`));
     return res.data;
   } catch (err) {
     console.error("Error al eliminar pago:", err.response?.data || err.message);
@@ -185,7 +206,7 @@ export const deletePayment = async (id) => {
 
 export const getUsers = async () => {
   try {
-    const res = await api.get('/users');
+    const res = await retryRequest(() => api.get('/users'));
     return res.data.data;
   } catch (err) {
     console.error("Error al obtener usuarios:", err.response?.data || err.message);
@@ -195,7 +216,7 @@ export const getUsers = async () => {
 
 export const getEvents = async () => {
   try {
-    const res = await api.get('/maintenance');
+    const res = await retryRequest(() => api.get('/maintenance'));
     return res.data.data;
   } catch (err) {
     console.error("Error al obtener eventos:", err.response?.data || err.message);
@@ -205,7 +226,7 @@ export const getEvents = async () => {
 
 export const createEvent = async (payload) => {
   try {
-    const res = await api.post('/maintenance', payload);
+    const res = await retryRequest(() => api.post('/maintenance', payload));
     return res.data.data;
   } catch (err) {
     console.error("Error al crear evento:", err.response?.data || err.message);
@@ -216,7 +237,7 @@ export const createEvent = async (payload) => {
 // NUEVO: Eliminar mantenimiento por id
 export const deleteEvent = async (id) => {
   try {
-    const res = await api.delete(`/maintenance/${id}`);
+    const res = await retryRequest(() => api.delete(`/maintenance/${id}`));
     return res.data;
   } catch (err) {
     console.error("Error al eliminar evento:", err.response?.data || err.message);
@@ -227,7 +248,7 @@ export const deleteEvent = async (id) => {
 // Editar evento/mantenimiento
 export const updateEvent = async (id, payload) => {
   try {
-    const res = await api.put(`/maintenance/${id}`, payload);
+    const res = await retryRequest(() => api.put(`/maintenance/${id}`, payload));
     return res.data.data;
   } catch (err) {
     console.error("Error al actualizar evento:", err.response?.data || err.message);
@@ -235,10 +256,21 @@ export const updateEvent = async (id, payload) => {
   }
 };
 
+// Actualizar estado de mantenimiento
+export const updateMaintenanceStatus = async (id, status) => {
+  try {
+    const res = await retryRequest(() => api.put(`/maintenance/${id}/status`, { status }));
+    return res.data.data;
+  } catch (err) {
+    console.error("Error al actualizar estado de mantenimiento:", err.response?.data || err.message);
+    throw err.response?.data || { error: "Error de conexión" };
+  }
+};
+
 // USUARIOS
 export const createUser = async (userData) => {
   try {
-    const res = await api.post('/users', userData);
+    const res = await retryRequest(() => api.post('/users', userData));
     return res.data.data;
   } catch (err) {
     console.error("Error al crear usuario:", err.response?.data || err.message);
@@ -246,10 +278,30 @@ export const createUser = async (userData) => {
   }
 };
 
+export const updateUser = async (id, userData) => {
+  try {
+    const res = await retryRequest(() => api.put(`/users/${id}`, userData));
+    return res.data.data;
+  } catch (err) {
+    console.error("Error al actualizar usuario:", err.response?.data || err.message);
+    throw err.response?.data || { error: "Error de conexión" };
+  }
+};
+
+export const deleteUser = async (id) => {
+  try {
+    const res = await retryRequest(() => api.delete(`/users/${id}`));
+    return res.data;
+  } catch (err) {
+    console.error("Error al eliminar usuario:", err.response?.data || err.message);
+    throw err.response?.data || { error: "Error de conexión" };
+  }
+};
+
 // NOTIFICACIONES
 export const getNotifications = async () => {
   try {
-    const res = await api.get('/notifications');
+    const res = await retryRequest(() => api.get('/notifications'));
     return res.data.data;
   } catch (err) {
     console.error("Error al obtener notificaciones:", err.response?.data || err.message);
@@ -259,7 +311,7 @@ export const getNotifications = async () => {
 
 export const createNotification = async (notificationData) => {
   try {
-    const res = await api.post('/notifications', notificationData);
+    const res = await retryRequest(() => api.post('/notifications', notificationData));
     return res.data.data;
   } catch (err) {
     console.error("Error al crear notificación:", err.response?.data || err.message);
@@ -269,7 +321,7 @@ export const createNotification = async (notificationData) => {
 
 export const updateNotification = async (id, notificationData) => {
   try {
-    const res = await api.put(`/notifications/${id}`, notificationData);
+    const res = await retryRequest(() => api.put(`/notifications/${id}`, notificationData));
     return res.data.data;
   } catch (err) {
     console.error("Error al actualizar notificación:", err.response?.data || err.message);
@@ -277,9 +329,19 @@ export const updateNotification = async (id, notificationData) => {
   }
 };
 
+export const markNotificationAsRead = async (id) => {
+  try {
+    const res = await retryRequest(() => api.put(`/notifications/${id}/read`));
+    return res.data.data;
+  } catch (err) {
+    console.error("Error al marcar notificación como leída:", err.response?.data || err.message);
+    throw err.response?.data || { error: "Error de conexión" };
+  }
+};
+
 export const deleteNotification = async (id) => {
   try {
-    const res = await api.delete(`/notifications/${id}`);
+    const res = await retryRequest(() => api.delete(`/notifications/${id}`));
     return res.data;
   } catch (err) {
     console.error("Error al eliminar notificación:", err.response?.data || err.message);
@@ -290,7 +352,7 @@ export const deleteNotification = async (id) => {
 // REPORTES DE DAÑOS
 export const getDamageReports = async () => {
   try {
-    const res = await api.get('/damage-reports/my-reports');
+    const res = await retryRequest(() => api.get('/damage-reports/my-reports'));
     return res.data.data;
   } catch (err) {
     console.error("Error al obtener reportes de daños:", err.response?.data || err.message);
@@ -300,7 +362,7 @@ export const getDamageReports = async () => {
 
 export const createDamageReport = async (reportData) => {
   try {
-    const res = await api.post('/damage-reports', reportData);
+    const res = await retryRequest(() => api.post('/damage-reports', reportData));
     return res.data.data;
   } catch (err) {
     console.error("Error al crear reporte de daño:", err.response?.data || err.message);
@@ -310,7 +372,7 @@ export const createDamageReport = async (reportData) => {
 
 export const updateDamageReport = async (id, reportData) => {
   try {
-    const res = await api.put(`/damage-reports/${id}`, reportData);
+    const res = await retryRequest(() => api.put(`/damage-reports/${id}`, reportData));
     return res.data.data;
   } catch (err) {
     console.error("Error al actualizar reporte de daño:", err.response?.data || err.message);
@@ -320,7 +382,7 @@ export const updateDamageReport = async (id, reportData) => {
 
 export const deleteDamageReport = async (id) => {
   try {
-    const res = await api.delete(`/damage-reports/${id}`);
+    const res = await retryRequest(() => api.delete(`/damage-reports/${id}`));
     return res.data;
   } catch (err) {
     console.error("Error al eliminar reporte de daño:", err.response?.data || err.message);
@@ -328,10 +390,21 @@ export const deleteDamageReport = async (id) => {
   }
 };
 
+// Actualizar estado de reporte de daño
+export const updateDamageReportStatus = async (id, status) => {
+  try {
+    const res = await retryRequest(() => api.put(`/damage-reports/${id}/status`, { status }));
+    return res.data.data;
+  } catch (err) {
+    console.error("Error al actualizar estado de reporte de daño:", err.response?.data || err.message);
+    throw err.response?.data || { error: "Error de conexión" };
+  }
+};
+
 // AIRBNB GUESTS
 export const getAirbnbGuests = async () => {
   try {
-    const res = await api.get('/airbnb/guests');
+    const res = await retryRequest(() => api.get('/airbnb/guests'));
     return res.data.data;
   } catch (err) {
     console.error("Error al obtener huéspedes Airbnb:", err.response?.data || err.message);
@@ -341,7 +414,7 @@ export const getAirbnbGuests = async () => {
 
 export const getActiveAirbnbGuests = async () => {
   try {
-    const res = await api.get('/airbnb/guests/active');
+    const res = await retryRequest(() => api.get('/airbnb/guests/active'));
     return res.data.data;
   } catch (err) {
     console.error("Error al obtener huéspedes activos:", err.response?.data || err.message);
@@ -351,7 +424,7 @@ export const getActiveAirbnbGuests = async () => {
 
 export const createAirbnbGuest = async (guestData) => {
   try {
-    const res = await api.post('/airbnb/guests', guestData);
+    const res = await retryRequest(() => api.post('/airbnb/guests', guestData));
     return res.data.data;
   } catch (err) {
     console.error("Error al crear huésped Airbnb:", err.response?.data || err.message);
@@ -361,7 +434,7 @@ export const createAirbnbGuest = async (guestData) => {
 
 export const updateAirbnbGuest = async (id, guestData) => {
   try {
-    const res = await api.put(`/airbnb/guests/${id}`, guestData);
+    const res = await retryRequest(() => api.put(`/airbnb/guests/${id}`, guestData));
     return res.data.data;
   } catch (err) {
     console.error("Error al actualizar huésped Airbnb:", err.response?.data || err.message);
@@ -371,7 +444,7 @@ export const updateAirbnbGuest = async (id, guestData) => {
 
 export const checkinAirbnbGuest = async (id) => {
   try {
-    const res = await api.put(`/airbnb/guests/${id}/checkin`);
+    const res = await retryRequest(() => api.put(`/airbnb/guests/${id}/checkin`));
     return res.data.data;
   } catch (err) {
     console.error("Error al hacer check-in:", err.response?.data || err.message);
@@ -379,9 +452,19 @@ export const checkinAirbnbGuest = async (id) => {
   }
 };
 
+export const checkoutAirbnbGuest = async (id) => {
+  try {
+    const res = await retryRequest(() => api.put(`/airbnb/guests/${id}/checkout`));
+    return res.data.data;
+  } catch (err) {
+    console.error("Error al hacer check-out:", err.response?.data || err.message);
+    throw err.response?.data || { error: "Error de conexión" };
+  }
+};
+
 export const deleteAirbnbGuest = async (id) => {
   try {
-    const res = await api.delete(`/airbnb/guests/${id}`);
+    const res = await retryRequest(() => api.delete(`/airbnb/guests/${id}`));
     return res.data;
   } catch (err) {
     console.error("Error al eliminar huésped Airbnb:", err.response?.data || err.message);

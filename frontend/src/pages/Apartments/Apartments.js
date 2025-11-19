@@ -48,6 +48,7 @@ const Apartments = () => {
     status: 'owner_occupied',
     type: '',
     assignedUserId: '',
+    ownerId: '',
     assignedRole: '',
   });
   const [users, setUsers] = useState([]);
@@ -197,9 +198,8 @@ const Apartments = () => {
       headerName: 'Propietario',
       width: 200,
       renderCell: (params) => {
-        const assignedUserId = params.row.assignedUserId;
-        const user = users.find(u => u.id === assignedUserId);
-        return user ? user.name : 'N/A';
+        const assignedUser = params.row.assignedUser;
+        return assignedUser ? assignedUser.name : 'N/A';
       },
     },
     {
@@ -229,7 +229,7 @@ const Apartments = () => {
       return date.toLocaleDateString('es-CO');
       },
     },
-    {
+    ...(user?.role === 'admin' ? [{
       field: 'actions',
       headerName: 'Acciones',
       width: 120,
@@ -251,7 +251,7 @@ const Apartments = () => {
           </IconButton>
         </Box>
       ),
-    },
+    }] : []),
   ];
 
   if (loading) {

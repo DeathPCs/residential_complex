@@ -68,11 +68,15 @@ const Dashboard = () => {
         requests.push(Promise.resolve({ data: { data: [] } }));
       }
 
+      let damageReportsRequest;
       if (user?.role === 'admin') {
-        requests.push(api.get('/damage-reports/my-reports').catch(() => ({ data: { data: [] } })));
+        damageReportsRequest = api.get('/damage-reports').catch(() => ({ data: { data: [], total: 0 } }));
+      } else if (['owner', 'tenant', 'airbnb_guest'].includes(user?.role)) {
+        damageReportsRequest = api.get('/damage-reports/my-reports').catch(() => ({ data: { data: [] } }));
       } else {
-        requests.push(Promise.resolve({ data: { data: [] } }));
+        damageReportsRequest = Promise.resolve({ data: { data: [] } });
       }
+      requests.push(damageReportsRequest);
 
       if (user?.role === 'admin') {
         requests.push(api.get('/payments').catch(() => ({ data: { data: [] } })));
@@ -86,15 +90,15 @@ const Dashboard = () => {
         requests.push(Promise.resolve({ data: { data: [] } }));
       }
 
-      const [apartmentsRes, maintenanceRes, notificationsRes, damageReportsRes, paymentsRes, usersRes] = await Promise.all(requests);
+      const [apartmentsRes, maintenanceRes, notificationsRes, airbnbRes, damageReportsRes, paymentsRes, usersRes] = await Promise.all(requests);
 
       setStats({
         apartments: apartmentsRes.data.data?.length || 0,
         maintenance: maintenanceRes.data.data?.length || 0,
-        damageReports: damageReportsRes.data.data?.length || 0,
+        damageReports: damageReportsRes.data.total || damageReportsRes.data.data?.length || 0,
         payments: paymentsRes.data.data?.length || 0,
         notifications: notificationsRes.data.data?.length || 0,
-        users: usersRes.data.data?.length || 0,
+        users: usersRes.data.total || usersRes.data.data?.length || 0,
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -119,18 +123,18 @@ const Dashboard = () => {
         allowedRoles: ['admin', 'owner'],
       },
       {
-        title: 'Mantenimientos',
-        value: stats.maintenance,
-        icon: <Build sx={{ fontSize: 40, color: 'secondary.main' }} />,
-        color: 'secondary.main',
-        allowedRoles: ['admin'],
-      },
-      {
         title: 'Reportes de Daños',
         value: stats.damageReports,
         icon: <Report sx={{ fontSize: 40, color: 'error.main' }} />,
         color: 'error.main',
         allowedRoles: ['admin', 'owner', 'tenant', 'airbnb_guest'],
+      },
+      {
+        title: 'Mantenimientos',
+        value: stats.maintenance,
+        icon: <Build sx={{ fontSize: 40, color: 'secondary.main' }} />,
+        color: 'secondary.main',
+        allowedRoles: ['admin'],
       },
       {
         title: 'Pagos',

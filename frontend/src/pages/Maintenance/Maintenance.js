@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import {
   Container,
   Typography,
@@ -10,29 +10,31 @@ import {
   DialogActions,
   TextField,
   MenuItem,
-  Card,
-  CardContent,
   Paper,
   InputAdornment,
-  Grid,
   Alert,
+  Chip,
+  IconButton,
 } from '@mui/material';
+import { DataGrid } from '@mui/x-data-grid';
 import {
   Add,
   Search,
-  Build,
-  Event,
-  Celebration,
-  People,
+  Edit,
+  Delete,
   Refresh,
+  CheckCircle,
 } from '@mui/icons-material';
-import api from '../../services/api';
+import api, { updateEvent, deleteEvent, updateMaintenanceStatus } from '../../services/api';
 import Loading from '../../components/common/Loading';
+import { AuthContext } from '../../context/AuthContext';
 
 const Maintenance = () => {
+  const { user } = useContext(AuthContext);
   const [maintenances, setMaintenances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState(null);
   const [formData, setFormData] = useState({
@@ -40,7 +42,8 @@ const Maintenance = () => {
     description: '',
     area: '',
     scheduledDate: '',
-    type: 'mantenimiento',
+    completedDate: '',
+    priority: '',
   });
 
   useEffect(() => {
@@ -55,7 +58,7 @@ const Maintenance = () => {
       setMaintenances(response.data.data || []);
     } catch (error) {
       console.error('Error fetching maintenances:', error);
-      setError(error.userMessage || 'Error al cargar eventos');
+      setError(error.userMessage || 'Error al cargar mantenimientos');
       setMaintenances([]);
     } finally {
       setLoading(false);
@@ -66,11 +69,67 @@ const Maintenance = () => {
     try {
       await api.post('/maintenance', formData);
       setOpen(false);
-      setFormData({ title: '', description: '', area: '', scheduledDate: '', type: 'mantenimiento' });
+      setFormData({ title: '', description: '', area: '', scheduledDate: '', completedDate: '', priority: ''});
       fetchMaintenances();
     } catch (error) {
       console.error('Error creating maintenance:', error);
-      setError(error.userMessage || 'Error al crear evento');
+      setError(error.userMessage || 'Error al crear mantenimiento');
+    }
+  };
+
+  const handleUpdate = async () => {
+    try {
+      await updateEvent(editing.id, formData);
+      setOpen(false);
+      setEditing(null);
+      setFormData({ title: '', description: '', area: '', scheduledDate: '', completedDate: '', priority: '' });
+      fetchMaintenances();
+    } catch (error) {
+      console.error('Error updating maintenance:', error);
+      setError(error.userMessage || 'Error al actualizar mantenimiento');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm('¿Estás seguro de que quieres eliminar este mantenimiento?')) {
+      try {
+        await deleteEvent(id);
+        fetchMaintenances();
+      } catch (error) {
+        console.error('Error deleting maintenance:', error);
+        setError(error.userMessage || 'Error al eliminar mantenimiento');
+      }
+    }
+  };
+
+  const handleEdit = (maintenance) => {
+    setEditing(maintenance);
+    setFormData({
+      title: maintenance.title,
+      description: maintenance.description,
+      area: maintenance.area,
+      scheduledDate: maintenance.scheduledDate ? maintenance.scheduledDate.split('T')[0] : '',
+      completedDate: maintenance.completedDate ? maintenance.completedDate.split('T')[0] : '',
+      priority: maintenance.priority || '',
+    });
+    setOpen(true);
+  };
+
+  const handleStatusToggle = async (id, currentStatus) => {
+    if (currentStatus === 'completed') return; // No permitir cambiar de completado
+
+    const nextStatus = currentStatus === 'pending' ? 'in_progress' : 'completed';
+
+    // Optimistically update the local state
+    setMaintenances(prev => prev.map(m => m.id === id ? { ...m, status: nextStatus } : m));
+
+    try {
+      await updateMaintenanceStatus(id, nextStatus);
+    } catch (error) {
+      // Revert the change on error
+      setMaintenances(prev => prev.map(m => m.id === id ? { ...m, status: currentStatus } : m));
+      console.error('Error updating status:', error);
+      setError(error.userMessage || 'Error al actualizar estado');
     }
   };
 
@@ -81,22 +140,121 @@ const Maintenance = () => {
     return matchesSearch;
   });
 
-  const getIcon = (type) => {
-    if (type && type.toLowerCase().includes("manten")) return <Build />;
-    if (type && type.toLowerCase().includes("fiesta")) return <Celebration />;
-    if (type && type.toLowerCase().includes("reuni")) return <People />;
-    return <Event />;
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'pending': return 'warning';
+      case 'in_progress': return 'info';
+      case 'completed': return 'success';
+      default: return 'default';
+    }
   };
 
-  const getIconColor = (type) => {
-    if (type && type.toLowerCase().includes("manten")) return "#ee9738";
-    if (type && type.toLowerCase().includes("fiesta")) return "#5c3eee";
-    if (type && type.toLowerCase().includes("reuni")) return "#3eb063";
-    return "#2586b8";
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'pending': return 'Pendiente';
+      case 'in_progress': return 'En Progreso';
+      case 'completed': return 'Completado';
+      default: return status;
+    }
   };
+
+  const columns = [
+    {
+      field: 'title',
+      headerName: 'Título',
+      width: 200,
+    },
+    {
+      field: 'description',
+      headerName: 'Descripción',
+      width: 300,
+    },
+    {
+      field: 'area',
+      headerName: 'Área',
+      width: 150,
+    },
+    {
+      field: 'status',
+      headerName: 'Estado',
+      width: 150,
+      renderCell: (params) => (
+        <Chip
+          label={getStatusLabel(params.value)}
+          color={getStatusColor(params.value)}
+          size="small"
+        />
+      ),
+    },
+    {
+      field: 'scheduledDate',
+      headerName: 'Fecha Programada',
+      width: 150,
+      renderCell: (params) => {
+        const date = new Date(params.value);
+        return date.toLocaleDateString('es-CO');
+      },
+    },
+    {
+      field: 'completedDate',
+      headerName: 'Fecha Completada',
+      width: 150,
+      renderCell: (params) => {
+        const date = new Date(params.value);
+        return date.toLocaleDateString('es-CO');
+      },
+    },
+    {
+      field: 'priority',
+      headerName: 'Prioridad',
+      width: 100,
+      renderCell: (params) => (
+        <Chip
+          label={params.value}
+          color={
+            params.value === 'high' ? 'error' :
+            params.value === 'medium' ? 'warning' : 'default'
+          }
+          size="small"
+        />
+      ),
+    },
+    ...(user?.role === 'admin' ? [{
+      field: 'actions',
+      headerName: 'Acciones',
+      width: 200,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {params.row.status !== 'completed' && (
+            <IconButton
+              color="success"
+              onClick={() => handleStatusToggle(params.row.id, params.row.status)}
+              title={params.row.status === 'pending' ? 'Iniciar' : 'Completar'}
+            >
+              <CheckCircle />
+            </IconButton>
+          )}
+          <IconButton
+            color="primary"
+            onClick={() => handleEdit(params.row)}
+            title="Editar"
+          >
+            <Edit />
+          </IconButton>
+          <IconButton
+            color="error"
+            onClick={() => handleDelete(params.row.id)}
+            title="Eliminar"
+          >
+            <Delete />
+          </IconButton>
+        </Box>
+      ),
+    }] : []),
+  ];
 
   if (loading) {
-    return <Loading message="Cargando eventos..." />;
+    return <Loading message="Cargando mantenimientos..." />;
   }
 
   return (
@@ -150,77 +308,41 @@ const Maintenance = () => {
               },
             }}
           />
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => setOpen(true)}
-            sx={{
-              backgroundColor: '#004272',
-              '&:hover': { backgroundColor: '#002a4a' },
-              borderRadius: '8px',
-            }}
-          >
-            Agregar evento
-          </Button>
+          {user?.role === 'admin' && (
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => {
+                setEditing(null);
+                setFormData({ title: '', description: '', area: '', scheduledDate: '', completedDate: '', priority: '' });
+                setOpen(true);
+              }}
+              sx={{
+                backgroundColor: '#004272',
+                '&:hover': { backgroundColor: '#002a4a' },
+                borderRadius: '8px',
+              }}
+            >
+              Agregar mantenimiento
+            </Button>
+          )}
         </Box>
 
-        {filteredMaintenances.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Typography variant="body1" color="text.secondary">
-              No hay eventos registrados.
-            </Typography>
-          </Box>
-        ) : (
-          <Grid container spacing={2}>
-            {filteredMaintenances.map((maintenance) => (
-              <Grid item xs={12} sm={6} md={4} key={maintenance.id}>
-                <Card sx={{
-                  borderRadius: '14px',
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
-                  backgroundColor: '#fff',
-                }}>
-                  <CardContent sx={{ p: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                      <Box sx={{
-                        width: 30,
-                        height: 30,
-                        borderRadius: '50%',
-                        backgroundColor: getIconColor(maintenance.type),
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        mr: 2,
-                      }}>
-                        {getIcon(maintenance.type)}
-                      </Box>
-                      <Box sx={{ flex: 1 }}>
-                        <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#2586b8' }}>
-                          {maintenance.title}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" numberOfLines={2}>
-                          {maintenance.description}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                          {maintenance.type ? maintenance.type.toUpperCase() : "MANTENIMIENTO"} · {maintenance.scheduledDate
-                            ? new Date(maintenance.scheduledDate).toLocaleDateString()
-                            : "Sin fecha"}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Área: {maintenance.area}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-        )}
+        <Box sx={{ height: 600 }}>
+          <DataGrid
+            rows={filteredMaintenances}
+            columns={columns}
+            pageSize={10}
+            rowsPerPageOptions={[10, 25, 50]}
+            loading={loading}
+            disableSelectionOnClick
+          />
+        </Box>
       </Paper>
 
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ textAlign: 'center', color: '#2586b8' }}>
-          Registrar mantenimiento
+          {editing ? 'Editar Mantenimiento' : 'Registrar Mantenimiento'}
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -243,7 +365,7 @@ const Maintenance = () => {
               label="Área"
               value={formData.area}
               onChange={(e) => setFormData({ ...formData, area: e.target.value })}
-              placeholder="piscina, parque, etc."
+              placeholder="Piscina, gym, elevador, áreas comunes, jardines..."
               fullWidth
               required
             />
@@ -256,21 +378,33 @@ const Maintenance = () => {
               fullWidth
             />
             <TextField
-              label="Tipo"
-              value={formData.type}
-              onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-              placeholder="mantenimiento, fiesta, etc."
+              label="Fecha completada"
+              type="date"
+              value={formData.completedDate}
+              onChange={(e) => setFormData({ ...formData, completedDate: e.target.value })}
+              InputLabelProps={{ shrink: true }}
               fullWidth
             />
+            <TextField
+              select
+              label="Prioridad"
+              value={formData.priority}
+              onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+              fullWidth
+            >
+              <MenuItem value="low">Baja</MenuItem>
+              <MenuItem value="medium">Media</MenuItem>
+              <MenuItem value="high">Alta</MenuItem>
+            </TextField>
           </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpen(false)}>Cancelar</Button>
           <Button
-            onClick={handleCreate}
+            onClick={editing ? handleUpdate : handleCreate}
             variant="contained"
           >
-            Guardar
+            {editing ? 'Actualizar' : 'Guardar'}
           </Button>
         </DialogActions>
       </Dialog>

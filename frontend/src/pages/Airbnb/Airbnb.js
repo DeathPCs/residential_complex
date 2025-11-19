@@ -1,38 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import {
-  Container,
-  Typography,
-  Box,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  MenuItem,
-  Chip,
-  Paper,
-  InputAdornment,
-  IconButton,
-  Grid,
-  Card,
-  CardContent,
-} from '@mui/material';
+import React, { useEffect, useState, useContext } from 'react';
+import { AuthContext } from '../../context/AuthContext';
+import { Container, Typography, Box, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Chip, Paper, InputAdornment, IconButton, Grid, Card, CardContent, } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
-import {
-  Add,
-  Search,
-  CheckCircle,
-  Delete,
-  Hotel,
-  Person,
-  Event,
-  AccessTime,
-  Edit,
+import { Add, Search, CheckCircle, Delete, Hotel, Person, Event, AccessTime, Edit,
 } from '@mui/icons-material';
-import api from '../../services/api';
+import { getAirbnbGuests, getActiveAirbnbGuests, createAirbnbGuest, updateAirbnbGuest, checkinAirbnbGuest, checkoutAirbnbGuest, deleteAirbnbGuest, getApartments, } from '../../services/api';
 
 const Airbnb = () => {
+  const { user } = useContext(AuthContext);
   const [guests, setGuests] = useState([]);
   const [activeGuests, setActiveGuests] = useState([]);
   const [apartments, setApartments] = useState([]);
@@ -58,8 +33,8 @@ const Airbnb = () => {
 
   const fetchGuests = async () => {
     try {
-      const response = await api.get('/airbnb/guests');
-      setGuests((response.data.data || []).filter(Boolean));
+      const guestsData = await getAirbnbGuests();
+      setGuests((guestsData || []).filter(Boolean));
     } catch (error) {
       console.error('Error fetching guests:', error);
       setGuests([]);
@@ -69,8 +44,8 @@ const Airbnb = () => {
   const fetchActiveGuests = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/airbnb/guests/active');
-      setActiveGuests(response.data.data || []);
+      const activeGuestsData = await getActiveAirbnbGuests();
+      setActiveGuests(activeGuestsData || []);
     } catch (error) {
       console.error('Error fetching active guests:', error);
     } finally {
@@ -80,8 +55,8 @@ const Airbnb = () => {
 
   const fetchApartments = async () => {
     try {
-      const response = await api.get('/apartments');
-      setApartments(response.data.data || []);
+      const apartmentsData = await getApartments();
+      setApartments(apartmentsData || []);
     } catch (error) {
       console.error('Error fetching apartments:', error);
     }
@@ -90,9 +65,9 @@ const Airbnb = () => {
   const handleCreate = async () => {
     try {
       if (editing) {
-        await api.put(`/airbnb/guests/${editing.id}`, formData);
+        await updateAirbnbGuest(editing.id, formData);
       } else {
-        await api.post('/airbnb/guests', formData);
+        await createAirbnbGuest(formData);
       }
       setOpen(false);
       setEditing(null);
@@ -126,18 +101,28 @@ const Airbnb = () => {
 
   const handleCheckIn = async (id) => {
     try {
-      await api.put(`/airbnb/guests/${id}/checkin`);
-      fetchGuests();
+      const updatedGuest = await checkinAirbnbGuest(id);
+      setGuests(prev => prev.map(g => g.id === id ? updatedGuest : g));
       fetchActiveGuests();
     } catch (error) {
       console.error('Error checking in guest:', error);
     }
   };
 
+  const handleCheckOut = async (id) => {
+    try {
+      const updatedGuest = await checkoutAirbnbGuest(id);
+      setGuests(prev => prev.map(g => g.id === id ? updatedGuest : g));
+      fetchActiveGuests();
+    } catch (error) {
+      console.error('Error checking out guest:', error);
+    }
+  };
+
   const handleDelete = async (id) => {
     if (window.confirm('¿Estás seguro de que quieres eliminar este huésped?')) {
       try {
-        await api.delete(`/airbnb/guests/${id}`);
+        await deleteAirbnbGuest(id);
         fetchGuests();
         fetchActiveGuests();
       } catch (error) {
@@ -153,6 +138,24 @@ const Airbnb = () => {
     const matchesStatus = !statusFilter || guest.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'pending': return 'warning';
+      case 'checked_in': return 'info';
+      case 'checked_out': return 'success';
+      default: return 'default';
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'pending': return 'Pendiente';
+      case 'checked_in': return 'Registrado';
+      case 'checked_out': return 'Revisado';
+      default: return status;
+    }
+  };
 
   const columns = [
     {
@@ -181,7 +184,7 @@ const Airbnb = () => {
     },
     {
       field: 'checkInDate',
-      headerName: 'Check-in',
+      headerName: 'Entrada',
       width: 120,
       renderCell: (params) => {
       const date = new Date(params.value);
@@ -190,7 +193,7 @@ const Airbnb = () => {
     },
     {
       field: 'checkOutDate',
-      headerName: 'Check-out',
+      headerName: 'Salida',
       width: 120,
       renderCell: (params) => {
       const date = new Date(params.value);
@@ -203,16 +206,13 @@ const Airbnb = () => {
       width: 120,
       renderCell: (params) => (
         <Chip
-          label={params.value}
-          color={
-            params.value === 'checked_in' ? 'success' :
-            params.value === 'pending' ? 'warning' : 'default'
-          }
+          label={getStatusLabel(params.value)}
+          color={getStatusColor(params.value)}
           size="small"
         />
       ),
     },
-    {
+    ...(user?.role === 'admin' ? [{
       field: 'actions',
       headerName: 'Acciones',
       width: 200,
@@ -234,6 +234,15 @@ const Airbnb = () => {
               <CheckCircle />
             </IconButton>
           )}
+          {params.row.status === 'checked_in' && (
+            <IconButton
+              color="warning"
+              onClick={() => handleCheckOut(params.row.id)}
+              title="Check-out"
+            >
+              <CheckCircle />
+            </IconButton>
+          )}
           <IconButton
             color="error"
             onClick={() => handleDelete(params.row.id)}
@@ -243,7 +252,7 @@ const Airbnb = () => {
           </IconButton>
         </Box>
       ),
-    },
+    }] : []),
   ];
 
   return (
@@ -290,7 +299,7 @@ const Airbnb = () => {
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                 <Event sx={{ mr: 1, color: 'warning.main' }} />
-                <Typography variant="h6">Pendientes Check-in</Typography>
+                <Typography variant="h6">Entradas Pendientes</Typography>
               </Box>
               <Typography variant="h3" color="warning.main">
                 {guests.filter(g => g.status === 'pending').length}
@@ -303,14 +312,10 @@ const Airbnb = () => {
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                 <AccessTime sx={{ mr: 1, color: 'info.main' }} />
-                <Typography variant="h6">Check-ins Hoy</Typography>
+                <Typography variant="h6">Entradas Actuales</Typography>
               </Box>
               <Typography variant="h3" color="info.main">
-                {guests.filter(g => {
-                  const checkInDate = new Date(g.checkInDate);
-                  const today = new Date();
-                  return checkInDate.toDateString() === today.toDateString();
-                }).length}
+                {guests.filter(g => g.status === 'checked_in').length}
               </Typography>
             </CardContent>
           </Card>
@@ -341,16 +346,18 @@ const Airbnb = () => {
           >
             <MenuItem value="">Todos</MenuItem>
             <MenuItem value="pending">Pendiente</MenuItem>
-            <MenuItem value="checked_in">Check-in Realizado</MenuItem>
-            <MenuItem value="checked_out">Check-out Realizado</MenuItem>
+            <MenuItem value="checked_in">Entrada</MenuItem>
+            <MenuItem value="checked_out">Salida</MenuItem>
           </TextField>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => setOpen(true)}
-          >
-            Registrar Huésped
-          </Button>
+          {user?.role === 'admin' ? (
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => setOpen(true)}
+            >
+              Registrar Huésped
+            </Button>
+          ) : null}
         </Box>
 
         <Box sx={{ height: 600 }}>
@@ -408,7 +415,7 @@ const Airbnb = () => {
               required
             />
             <TextField
-              label="Fecha de Check-in"
+              label="Fecha de entrada"
               type="date"
               value={formData.checkInDate}
               onChange={(e) => setFormData({ ...formData, checkInDate: e.target.value })}
@@ -417,7 +424,7 @@ const Airbnb = () => {
               required
             />
             <TextField
-              label="Fecha de Check-out"
+              label="Fecha de salida"
               type="date"
               value={formData.checkOutDate}
               onChange={(e) => setFormData({ ...formData, checkOutDate: e.target.value })}

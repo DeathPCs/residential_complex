@@ -29,7 +29,7 @@ import {
   Edit,
   Delete,
 } from '@mui/icons-material';
-import api from '../../services/api';
+import api, { markNotificationAsRead } from '../../services/api';
 
 const NotificationsPage = () => {
   const [notifications, setNotifications] = useState([]);
@@ -101,8 +101,7 @@ const NotificationsPage = () => {
 
   const handleMarkAsRead = async (id) => {
     try {
-      // Note: This might need a backend endpoint to mark as read
-      // For now, we'll just refetch
+      await markNotificationAsRead(id);
       fetchNotifications();
     } catch (error) {
       console.error('Error marking notification as read:', error);

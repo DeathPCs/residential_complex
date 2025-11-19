@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import {
   Container,
   Typography,
@@ -10,31 +10,31 @@ import {
   DialogActions,
   TextField,
   MenuItem,
-  Card,
-  CardContent,
   Chip,
   Paper,
   InputAdornment,
   IconButton,
-  Grid,
   Alert,
 } from '@mui/material';
+import { DataGrid } from '@mui/x-data-grid';
 import {
   Add,
   Search,
+  Edit,
+  Delete,
   CheckCircle,
-  Person,
-  Home,
-  Flight,
   Refresh,
 } from '@mui/icons-material';
-import { getUsers, getApartments, getPayments, registerPaymentAsPaid, createPayment } from '../../services/api';
+import { getUsers, getApartments, getPayments, registerPaymentAsPaid, createPayment, updatePayment, deletePayment } from '../../services/api';
 import Loading from '../../components/common/Loading';
+import { AuthContext } from '../../context/AuthContext';
 
 const Payments = () => {
+  const { user } = useContext(AuthContext);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [users, setUsers] = useState([]);
   const [apartments, setApartments] = useState([]);
@@ -45,6 +45,7 @@ const Payments = () => {
     amount: '',
     concept: 'Pago de administración',
     dueDate: '',
+    paidDate: '',
   });
 
   useEffect(() => {
@@ -90,23 +91,57 @@ const Payments = () => {
 
   const handleCreate = async () => {
     try {
-      await createPayment(formData);
+      if (editing) {
+        await updatePayment(editing.id, formData);
+      } else {
+        await createPayment(formData);
+      }
       setOpen(false);
-      setFormData({ userId: '', apartmentId: '', amount: '', concept: 'Pago de administración', dueDate: '' });
+      setEditing(null);
+      setFormData({ userId: '', apartmentId: '', amount: '', concept: 'Pago de administración', dueDate: '', paidDate: '' });
       fetchPayments();
     } catch (error) {
-      console.error('Error creating payment:', error);
-      setError(error.userMessage || 'Error al crear pago');
+      console.error('Error creating/updating payment:', error);
+      setError(error.userMessage || 'Error al crear/actualizar pago');
+      // Always fetch payments to ensure UI is up to date even on error
+      fetchPayments();
     }
   };
 
-  const handleMarkAsPaid = async (id) => {
+  const handleEdit = (payment) => {
+    setEditing(payment);
+    setFormData({
+      userId: payment.userId || '',
+      apartmentId: payment.apartment?.id || '',
+      amount: payment.amount || '',
+      concept: payment.concept || 'Pago de administración',
+      dueDate: payment.dueDate ? payment.dueDate.split('T')[0] : '',
+      paidDate: payment.paidDate ? payment.paidDate.split('T')[0] : '',
+    });
+    setOpen(true);
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm('¿Estás seguro de que quieres eliminar este pago?')) {
+      try {
+        await deletePayment(id);
+        fetchPayments();
+      } catch (error) {
+        console.error('Error deleting payment:', error);
+        setError(error.userMessage || 'Error al eliminar pago');
+      }
+    }
+  };
+
+  const handleStatusToggle = async (id, currentStatus) => {
+    if (currentStatus === 'paid') return; // No permitir cambiar de pagado
+
     try {
       await registerPaymentAsPaid(id);
       fetchPayments();
     } catch (error) {
-      console.error('Error marking payment as paid:', error);
-      setError(error.userMessage || 'Error al registrar pago');
+      console.error('Error updating payment status:', error);
+      setError(error.userMessage || 'Error al actualizar estado del pago');
     }
   };
 
@@ -114,37 +149,122 @@ const Payments = () => {
     const matchesSearch = payment.concept?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          payment.user?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          payment.user?.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         payment.apartment?.number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         payment.apartment?.number?.toString().includes(searchTerm) ||
                          payment.apartment?.tower?.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesSearch;
   });
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'paid': return '#39c079';
-      case 'pending': return '#eac73f';
-      case 'late': return '#ed4b4b';
-      default: return '#4a6373';
+      case 'paid': return 'success';
+      case 'pending': return 'warning';
+      case 'late': return 'error';
+      default: return 'default';
     }
   };
 
   const getStatusLabel = (status) => {
     switch (status) {
-      case 'paid': return 'AL DÍA';
-      case 'pending': return 'PENDIENTE';
-      case 'late': return 'MORA';
+      case 'paid': return 'Pagado';
+      case 'pending': return 'Pendiente';
+      case 'late': return 'Mora';
       default: return status;
     }
   };
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'paid': return 'checkmark-circle';
-      case 'pending': return 'alert-circle';
-      case 'late': return 'close-circle';
-      default: return 'help-circle';
-    }
-  };
+  const columns = [
+    {
+      field: 'apartment',
+      headerName: 'Apartamento',
+      width: 120,
+      renderCell: (params) => {
+        return params.row.apartment ? `Torre ${params.row.apartment.tower} - Apt ${params.row.apartment.number}` : 'N/A';
+      },
+    },
+    {
+      field: 'user',
+      headerName: 'Usuario',
+      width: 150,
+      renderCell: (params) => {
+        return params.row.user ? `${params.row.user.name}` : 'N/A';
+      },
+    },
+    {
+      field: 'concept',
+      headerName: 'Concepto',
+      width: 200,
+    },
+    {
+      field: 'amount',
+      headerName: 'Monto',
+      width: 120,
+      renderCell: (params) => `$${params.value?.toLocaleString() || 0}`,
+    },
+    {
+      field: 'dueDate',
+      headerName: 'Fecha de Vencimiento',
+      width: 150,
+      renderCell: (params) => {
+        if (!params.value) return 'N/A';
+        const date = new Date(params.value);
+        return date.toLocaleDateString('es-CO');
+      },
+    },
+    {
+      field: 'paidDate',
+      headerName: 'Fecha de Pago',
+      width: 150,
+      renderCell: (params) => {
+        if (!params.value) return 'N/A';
+        const date = new Date(params.value);
+        return date.toLocaleDateString('es-CO');
+      },
+    },
+    {
+      field: 'status',
+      headerName: 'Estado',
+      width: 120,
+      renderCell: (params) => (
+        <Chip
+          label={getStatusLabel(params.value)}
+          color={getStatusColor(params.value)}
+          size="small"
+        />
+      ),
+    },
+    ...(user?.role === 'admin' ? [{
+      field: 'actions',
+      headerName: 'Acciones',
+      width: 200,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {params.row.status !== 'paid' && (
+            <IconButton
+              color="success"
+              onClick={() => handleStatusToggle(params.row.id, params.row.status)}
+              title="Marcar como pagado"
+            >
+              <CheckCircle />
+            </IconButton>
+          )}
+          <IconButton
+            color="primary"
+            onClick={() => handleEdit(params.row)}
+            title="Editar"
+          >
+            <Edit />
+          </IconButton>
+          <IconButton
+            color="error"
+            onClick={() => handleDelete(params.row.id)}
+            title="Eliminar"
+          >
+            <Delete />
+          </IconButton>
+        </Box>
+      ),
+    }] : []),
+  ];
 
   if (loading) {
     return <Loading message="Cargando pagos..." />;
@@ -195,99 +315,36 @@ const Payments = () => {
             }}
             sx={{ minWidth: 300 }}
           />
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => setOpen(true)}
-          >
-            Agregar pago
-          </Button>
+          {user?.role === 'admin' && (
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => {
+                setEditing(null);
+                setFormData({ userId: '', apartmentId: '', amount: '', concept: 'Pago de administración', dueDate: '', paidDate: '' });
+                setOpen(true);
+              }}
+            >
+              Agregar pago
+            </Button>
+          )}
         </Box>
 
-        {filteredPayments.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Typography variant="body1" color="text.secondary">
-              No hay pagos registrados este mes.
-            </Typography>
-          </Box>
-        ) : (
-          <Grid container spacing={2}>
-            {filteredPayments.map((payment) => (
-              <Grid item xs={12} sm={6} md={4} key={payment.id}>
-                <Card sx={{
-                  borderRadius: '12px',
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
-                  backgroundColor: '#fff',
-                }}>
-                  <CardContent sx={{ p: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                      <Box sx={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: '50%',
-                        backgroundColor: getStatusColor(payment.status),
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        mr: 2,
-                      }}>
-                        <Typography variant="body2" sx={{ color: '#fff', fontWeight: 'bold' }}>
-                          {getStatusIcon(payment.status) === 'checkmark-circle' ? '✓' :
-                           getStatusIcon(payment.status) === 'alert-circle' ? '!' :
-                           getStatusIcon(payment.status) === 'close-circle' ? '✗' : '?'}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ flex: 1 }}>
-                        <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#004272' }}>
-                          {payment.apartment
-                            ? `Torre ${payment.apartment.tower}, Apto ${payment.apartment.number}`
-                            : "Sin apartamento"}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {payment.user?.name || "Usuario"} — {payment.concept}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {getStatusLabel(payment.status)} · Vence: {payment.dueDate
-                            ? new Date(payment.dueDate).toLocaleDateString()
-                            : "N/A"}
-                        </Typography>
-                      </Box>
-                      <Typography variant="h6" sx={{
-                        fontWeight: 'bold',
-                        color: getStatusColor(payment.status),
-                        ml: 1
-                      }}>
-                        ${payment.amount?.toLocaleString() || 0}
-                      </Typography>
-                    </Box>
-                    {(payment.status === 'pending' || payment.status === 'late') && (
-                      <Button
-                        variant="contained"
-                        size="small"
-                        startIcon={<CheckCircle />}
-                        onClick={() => handleMarkAsPaid(payment.id)}
-                        sx={{
-                          mt: 1,
-                          backgroundColor: '#39c079',
-                          '&:hover': { backgroundColor: '#2e8b5f' },
-                          borderRadius: '8px',
-                          textTransform: 'none',
-                        }}
-                      >
-                        Registrar pago
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-        )}
+        <Box sx={{ height: 600 }}>
+          <DataGrid
+            rows={filteredPayments}
+            columns={columns}
+            pageSize={10}
+            rowsPerPageOptions={[10, 25, 50]}
+            loading={loading}
+            disableSelectionOnClick
+          />
+        </Box>
       </Paper>
 
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ textAlign: 'center', color: '#004272' }}>
-          Registrar pago de administración
+          {editing ? 'Editar Pago' : 'Registrar pago de administración'}
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -297,6 +354,7 @@ const Payments = () => {
               value={formData.userId}
               onChange={(e) => setFormData({ ...formData, userId: e.target.value })}
               fullWidth
+              required
             >
               {users.map((user) => (
                 <MenuItem key={user.id} value={user.id}>
@@ -310,6 +368,7 @@ const Payments = () => {
               value={formData.apartmentId}
               onChange={(e) => setFormData({ ...formData, apartmentId: e.target.value })}
               fullWidth
+              required
             >
               {apartments.map((apartment) => (
                 <MenuItem key={apartment.id} value={apartment.id}>
@@ -323,6 +382,7 @@ const Payments = () => {
               value={formData.amount}
               onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
               fullWidth
+              required
               placeholder="Monto a cobrar"
             />
             <TextField
@@ -339,6 +399,15 @@ const Payments = () => {
               onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
               InputLabelProps={{ shrink: true }}
               fullWidth
+              required
+            />
+            <TextField
+              label="Fecha de pago"
+              type="date"
+              value={formData.paidDate}
+              onChange={(e) => setFormData({ ...formData, paidDate: e.target.value })}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
             />
           </Box>
         </DialogContent>
@@ -348,7 +417,7 @@ const Payments = () => {
             onClick={handleCreate}
             variant="contained"
           >
-            Registrar pago
+            {editing ? 'Actualizar' : 'Registrar'}
           </Button>
         </DialogActions>
       </Dialog>
